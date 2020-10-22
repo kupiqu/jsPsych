@@ -57,6 +57,10 @@ window.jsPsych = (function() {
       console.error('No timeline declared in jsPsych.init. Cannot start experiment.')
     }
 
+    if(options.timeline.length == 0){
+      console.error('No trials have been added to the timeline (the timeline is an empty array). Cannot start experiment.')
+    }
+
     // reset variables
     timeline = null;
     global_trial_index = 0;
@@ -577,8 +581,16 @@ window.jsPsych = (function() {
         // if progress.current_location is -1, then the timeline variable is being evaluated
         // in a function that runs prior to the trial starting, so we should treat that trial
         // as being the active trial for purposes of finding the value of the timeline variable
-        var loc = Math.max(0, progress.current_location); 
-        return timeline_parameters.timeline[loc].timelineVariable(variable_name);
+        var loc = Math.max(0, progress.current_location);
+        // if loc is greater than the number of elements on this timeline, then the timeline
+        // variable is being evaluated in a function that runs after the trial on the timeline
+        // are complete but before advancing to the next (like a loop_function).
+        // treat the last active trial as the active trial for this purpose.
+        if(loc == timeline_parameters.timeline.length){
+          loc = loc - 1;
+        }
+        // now find the variable
+        return timeline_parameters.timeline[loc].timelineVariable(variable_name); 
       }
     }
 
@@ -1129,22 +1141,48 @@ jsPsych.data = (function() {
       }
     }
 
+    /**
+     * Queries the first n elements in a collection of trials.
+     *
+     * @param {number} n A positive integer of elements to return. A value of
+     *                   n that is less than 1 will throw an error.
+     *
+     * @return {Array} First n objects of a collection of trials. If fewer than
+     *                 n trials are available, the trials.length elements will
+     *                 be returned.
+     *
+     */
     data_collection.first = function(n){
-      if(typeof n=='undefined'){ n = 1 }
-      var out = [];
-      for(var i=0; i<n; i++){
-        out.push(trials[i]);
+      if (typeof n == 'undefined') { n = 1 }
+      if (n < 1) {
+        throw `You must query with a positive nonzero integer. Please use a 
+               different value for n.`;
       }
-      return DataCollection(out);
+      if (trials.length == 0) return DataCollection([]);
+      if (n > trials.length) n = trials.length;
+      return DataCollection(trials.slice(0, n));
     }
 
-    data_collection.last = function(n){
-      if(typeof n=='undefined'){ n = 1 }
-      var out = [];
-      for(var i=trials.length-n; i<trials.length; i++){
-        out.push(trials[i]);
+    /**
+     * Queries the last n elements in a collection of trials.
+     *
+     * @param {number} n A positive integer of elements to return. A value of
+     *                   n that is less than 1 will throw an error.
+     *
+     * @return {Array} Last n objects of a collection of trials. If fewer than
+     *                 n trials are available, the trials.length elements will
+     *                 be returned.
+     *
+     */
+    data_collection.last = function(n) {
+      if (typeof n == 'undefined') { n = 1 }
+      if (n < 1) {
+        throw `You must query with a positive nonzero integer. Please use a 
+               different value for n.`;
       }
-      return DataCollection(out);
+      if (trials.length == 0) return DataCollection([]);
+      if (n > trials.length) n = trials.length;
+      return DataCollection(trials.slice(trials.length - n, trials.length));
     }
 
     data_collection.values = function(){
@@ -2328,15 +2366,16 @@ jsPsych.pluginAPI = (function() {
     function load_audio_file_html5audio(source, count){
       count = count || 1;
       var audio = new Audio();
-      audio.addEventListener('canplaythrough', function(){
+      audio.addEventListener('canplaythrough', function handleCanPlayThrough(){
         audio_buffers[source] = audio;
         n_loaded++;
         loadfn(n_loaded);
         if(n_loaded == files.length){
           finishfn();
         }
+        audio.removeEventListener('canplaythrough', handleCanPlayThrough);
       });
-      audio.addEventListener('onerror', function(){
+      audio.addEventListener('error', function handleError(){
         if(count < jsPsych.initSettings().max_preload_attempts){
           setTimeout(function(){
             load_audio_file_html5audio(source, count+1)
@@ -2344,8 +2383,9 @@ jsPsych.pluginAPI = (function() {
         } else {
           jsPsych.loadFail();
         }
+        audio.removeEventListener('error', handleError);
       });
-      audio.addEventListener('onstalled', function(){
+      audio.addEventListener('stalled', function handleStalled(){
         if(count < jsPsych.initSettings().max_preload_attempts){
           setTimeout(function(){
             load_audio_file_html5audio(source, count+1)
@@ -2353,8 +2393,9 @@ jsPsych.pluginAPI = (function() {
         } else {
           jsPsych.loadFail();
         }
+        audio.removeEventListener('stalled', handleStalled);
       });
-      audio.addEventListener('onabort', function(){
+      audio.addEventListener('abort', function handleAbort(){
         if(count < jsPsych.initSettings().max_preload_attempts){
           setTimeout(function(){
             load_audio_file_html5audio(source, count+1)
@@ -2362,6 +2403,7 @@ jsPsych.pluginAPI = (function() {
         } else {
           jsPsych.loadFail();
         }
+        audio.removeEventListener('abort', handleAbort);
       });
       audio.src = source;
     }
